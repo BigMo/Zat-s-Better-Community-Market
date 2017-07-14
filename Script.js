@@ -153,6 +153,8 @@ function installQuickSell(parent, asset) {
                 MessageDialog.Show("Unknown market-price: " + scope.asset.description.name, "Zat's Better Community Market");
             } else {
                 var sellPrice = moneyToFloat(g_Assets["" + scope.asset.assetid]) - 1;
+                if (sellPrice < 3)
+                    sellPrice = 3;
                 var price = getSellPrice(scope.asset, sellPrice);
                 var f = "sessionid=" + g_sessionID +
                     "&appid=" + g_ActiveInventory.appid +
