@@ -1,27 +1,79 @@
 // ==UserScript==
 // @name         Zat's Better Community Market
 // @namespace
-// @version      0.1
+// @version      0.2
 // @description  QuickSell ($), market price display, inventory networth, wallet balance
 // @author       Zat
 // @match        https://steamcommunity.com/id/*/inventory/*
 // @grant        none
 // @run-at document-end
 // ==/UserScript==
+var $ = window.jQuery;
 
-Storage.prototype.setObject = function(key, value) {
-    this.setItem(key, JSON.stringify({ time: new Date(), value: value }));
+var origFn = CInventory.prototype.BuildItemElement;
+var asyncAssets = Array();
+
+CInventory.prototype.BuildItemElement = function hkBuildItemElement(asset, $Item) {
+    var args = Array.prototype.slice.call(arguments, 0);
+    origFn.apply(this, args);
+    checkAsset(asset, $Item);
 };
 
+function checkAsset(asset, $Item) {
+    if (!asset.description.marketable)
+        return;
+    var div = $Item[0]; //asset.element;
+    var sub = document.getElementById("price_" + asset.assetid);
+    if (!sub) {
+        if (!div)
+            return;
+        var s = createPriceElement(div, asset);
+        var storedAsset = localStorage.getObject("asset" + asset.assetid);
+        if (storedAsset) {
+            s.innerText = storedAsset.price;
+            installQuickSell(div, asset);
+            updateNetworth(storedAsset.price);
+        } else {
+            asyncAssets.push({ element: s, parent: div, asset: asset });
+        }
+    } else {
+        div = sub.parentNode;
+        var storedAsset = localStorage.getObject("asset" + asset.assetid);
+        if (!storedAsset) {
+            asyncAssets.push({ element: sub, parent: div, asset: asset });
+        }
+    }
+}
+
+function processAsyncAssets() {
+    if (!asyncAssets || !asyncAssets.length)
+        return;
+    var entry = asyncAssets[0];
+    var element = entry.element;
+    var parent = entry.parent;
+    var asset = entry.asset;
+    console.log(asset.description.name);
+    getMarketValueForElement(element, parent, asset,
+        function(scope) {
+            asyncAssets.splice(0, 1);
+            processAsyncAssets();
+        }, {});
+}
+
+//Put an item into a storage, adding an "expires"-field to it (used for caching expiration)
+Storage.prototype.setObject = function(key, value) {
+    var expires = new Date();
+    expires.setHours(expires.getHours() + 2);
+    this.setItem(key, JSON.stringify({ expires: expires, value: value }));
+};
+
+//Retrieve an item from a storage, checking for existance and expiration
 Storage.prototype.getObject = function(key) {
     var res = this.getItem(key);
     if (!res || res === null)
         return false;
-
     var val = JSON.parse(res);
-    var nd = new Date(val.time);
-    nd.setHours(nd.getHours() + 48);
-    if (new Date() > nd) {
+    if (new Date() > val.expires) {
         this.removeItem(key);
         return false;
     }
@@ -29,9 +81,9 @@ Storage.prototype.getObject = function(key) {
 };
 
 var inventory_networth = 0;
-var g_Assets = localStorage.getObject("assets") ? localStorage.getObject("assets") : {};
 
-function loadStuff(method, address, success, error, scope, post) {
+//Performs a webrequest
+function httpRequest(method, address, success, error, scope, post) {
     var xmlhttp = new XMLHttpRequest();
 
     xmlhttp.onreadystatechange = function() {
@@ -48,66 +100,53 @@ function loadStuff(method, address, success, error, scope, post) {
     if (post) {
         xmlhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded; charset=UTF-8");
         xmlhttp.send(post);
-    } else
+    } else {
         xmlhttp.send();
+    }
 }
 
-function checkInventory() {
-    if (UserYou.nActiveAppId != 753)
-        return;
-    document.getElementById("inventory_applogo").src = "https://i.imgur.com/4GW6mWQ.png";
-    document.title = "Zat's Better Community Market";
-    var inventory = UserYou.rgContexts["753"]["6"].inventory;
-    if (Object.keys(inventory.m_rgAssets).length == 0) {
-        return;
-    } else {}
+//Extracts marketable items from the given inventory
+function getMarketableItems(inventory) {
     var assets = Array();
-    for (var key in inventory.m_rgAssets) {
-        if (inventory.m_rgAssets.hasOwnProperty(key)) {
-            if (inventory.m_rgAssets[key].description.marketable == 1)
-                assets.push(inventory.m_rgAssets[key]);
-        }
-    }
-    for (var key in assets) {
-        var asset = assets[key];
-        var div = asset.element;
-        if (!div)
-            return;
-        var sub = document.getElementById("price_" + asset.assetid);
-        if (!sub) {
-            var s = document.createElement("div");
-            s.id = "price_" + asset.assetid;
-            s.style.position = "absolute";
-            s.style.bottom = "-1px";
-            s.style.right = "-1px";
-            s.style.background = "rgb(41,41,41)";
-            s.style.padding = "2px 8px";
-            s.style.float = "right";
-            s.style.border = "solid #3A3A3A 1px";
-            s.style.fontSize = "smaller";
-            s.innerText = "[pending]";
-            div.appendChild(s);
-            if (g_Assets["" + asset.assetid]) {
-                s.innerText = g_Assets["" + asset.assetid];
-                installQuickSell(div, asset);
-                updateNetworth(g_Assets["" + asset.assetid]);
-            } else {
-                loadStuff("GET", "https://steamcommunity.com/market/priceoverview/?country=" + g_rgWalletInfo.wallet_country + "&currency=" + g_rgWalletInfo.wallet_currency + "&appid=753&market_hash_name=" + asset.description.market_hash_name,
-                    function(data, scope) {
-                        var obj = JSON.parse(data);
-                        scope.element.innerText = obj.lowest_price;
-                        g_Assets["" + scope.asset.assetid] = obj.lowest_price;
-                        localStorage.setObject("assets", g_Assets);
-                        updateNetworth(obj.lowest_price);
-                        installQuickSell(scope.parent, scope.asset);
-                    },
-                    function(status, scope) {
-                        scope.element.innerText = "[E: " + status + "]";
-                        scope.element.style.background = "#ff0000";
-                    }, { element: s, asset: asset, parent: div });
+    if (Object.keys(inventory.m_rgAssets).length > 0) {
+        for (var key in inventory.m_rgAssets) {
+            if (inventory.m_rgAssets.hasOwnProperty(key)) {
+                if (inventory.m_rgAssets[key].description.marketable == 1)
+                    assets.push(inventory.m_rgAssets[key]);
             }
         }
     }
+    return assets;
+}
+
+function createPriceElement(parent, asset) {
+    var s = new Element('div', {
+        'id': "price_" + asset.assetid,
+        'style': 'position:absolute; bottom:-1px; right:-1px; background: rgb(41,41,41); padding: 2px 8px; float: right; border: solid #3A3A3A 1px; font-size: smaller;'
+    });
+    s.innerText = "[pending]";
+    parent.appendChild(s);
+    return s;
+}
+
+function getMarketValueForElement(element, parent, asset, onSuccess, onSuccessScope) {
+    element.innerText = "[pending]";
+    element.style.background = "rgb(41,41,41)";
+    httpRequest("GET", "//steamcommunity.com/market/priceoverview/?country=" + g_rgWalletInfo.wallet_country + "&currency=" + g_rgWalletInfo.wallet_currency + "&appid=753&market_hash_name=" + asset.description.market_hash_name,
+        function(data, scope) {
+            var obj = JSON.parse(data);
+            scope.element.innerText = obj.lowest_price;
+            scope.element.style.background = "rgb(41,41,41)";
+            localStorage.setObject("asset" + scope.asset.assetid, { price: obj.lowest_price });
+            updateNetworth(obj.lowest_price);
+            installQuickSell(scope.parent, scope.asset);
+            if (onSuccess)
+                onSuccess(onSuccessScope);
+        },
+        function(status, scope) {
+            scope.element.innerText = "[E: " + status + "]";
+            scope.element.style.background = "#ff0000";
+        }, { element: element, asset: asset, parent: parent });
 }
 
 function getSellPrice(asset, price) {
@@ -115,7 +154,7 @@ function getSellPrice(asset, price) {
     var quantity = 1;
 
     if (price && nAmount == parseInt(nAmount)) {
-        // Calculate what the seller gets
+        // Calculate what the seller gets, ripped from valve's code - thx m8s
         var publisherFee = typeof asset.description.market_fee != 'undefined' ? asset.description.market_fee : g_rgWalletInfo['wallet_publisher_fee_percent_default'];
         var feeInfo = CalculateFeeAmount(nAmount, publisherFee);
         nAmount = nAmount - feeInfo.fees;
@@ -133,26 +172,20 @@ function moneyToFloat(str) {
 }
 
 function installQuickSell(parent, asset) {
-    var btn = document.createElement("span");
-    btn.classList.add("btn_small");
-    btn.classList.add("btn_green_white_innerfade");
-    btn.classList.add("item_market_action_button_contents");
-    btn.style.position = "absolute";
-    btn.style.zIndex = "999";
-    btn.style.top = "0";
-    btn.style.left = "0px";
-    btn.style.padding = "2px 10px";
-    btn.style.minWidth = "0px";
+    var btn = new Element('span', {
+        'class': 'btn_small btn_green_white_innerfade item_market_action_button_contents',
+        'style': 'position: absolute; z-index: 999; top: 0px; left: 0px; padding: 2px 10px; min-width: 0px'
+    });
     btn.innerText = "$";
     parent.appendChild(btn);
-    //console.log("Installed into " + parent.id);
     btn.addEventListener("click", function() {
         (function(scope) {
             var f = new FormData();
-            if (!g_Assets["" + scope.asset.assetid]) {
+            var storedAsset = localStorage.getObject("asset" + scope.asset.assetid);
+            if (!storedAsset) {
                 MessageDialog.Show("Unknown market-price: " + scope.asset.description.name, "Zat's Better Community Market");
             } else {
-                var sellPrice = moneyToFloat(g_Assets["" + scope.asset.assetid]) - 1;
+                var sellPrice = moneyToFloat(storedAsset.price) - 1;
                 if (sellPrice < 3)
                     sellPrice = 3;
                 var price = getSellPrice(scope.asset, sellPrice);
@@ -162,17 +195,21 @@ function installQuickSell(parent, asset) {
                     "&assetid=" + scope.asset.assetid +
                     "&amount=" + 1 +
                     "&price=" + price;
-                loadStuff("POST", "https://steamcommunity.com/market/sellitem/", function(data, scope) {
-                    MessageDialog.Show("Successfully sold " + scope.asset.description.name + " for " + v_currencyformat(scope.sellPrice, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + " (" + v_currencyformat(scope.price, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + ")!", "Zat's Better Community Market");
+                httpRequest("POST", "//steamcommunity.com/market/sellitem/", function(data, scope) {
+                    var parent = scope.button.parentNode;
+                    parent.style.opacity = 0.1;
+                    parent.removeChild(scope.button);
+                    MessageDialog.Show("Successfully sold \"" + scope.asset.description.name + "\" for " + v_currencyformat(scope.sellPrice, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + " (" + v_currencyformat(scope.price, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + ")!", "Zat's Better Community Market");
                 }, function(status, scope) {
-                    MessageDialog.Show("Failed to sell " + scope.asset.description.name + ": " + status, "Zat's Better Community Market");
+                    MessageDialog.Show("Failed to sell \"" + scope.asset.description.name + "\": " + status, "Zat's Better Community Market");
                 }, {
                     asset: asset,
                     price: price,
-                    sellPrice: sellPrice
+                    sellPrice: sellPrice,
+                    button: btn
                 }, f);
             }
-        })({ asset: asset });
+        })({ asset: asset, button: btn });
     });
 }
 
@@ -180,23 +217,24 @@ function updateNetworth(price) {
     var display = document.getElementById("inventory_networth");
     inventory_networth += parseFloat(price.replace(/[^0-9-.]/g, '')) / 100;
     inventory_networth = Math.round(inventory_networth * 100) / 100;
-    display.innerText = "[Inventory: " + inventory_networth + "]";
+    display.innerText = "[Inventory: " + v_currencyformat(inventory_networth * 100, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + "]";
 }
 
 (function() {
     'use strict';
     console.log("Zat's Better Community Market initiated!");
     console.log("Your SteamID: " + UserYou.strSteamId);
-    document.getElementById("account_pulldown").innerText += " (" + (g_rgWalletInfo.wallet_balance / 100) + ")";
+    document.getElementById("account_pulldown").innerText += " (" + v_currencyformat(g_rgWalletInfo.wallet_balance, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + ")";
     if (UserYou.nActiveAppId != 753) {
         console.log("You're not browsing Steam-inventory, terminating.");
         return;
     } else {
         console.log("You're browsing Steam-inventory!");
     }
-    var networth = document.createElement("div");
-    document.getElementById("account_pulldown").appendChild(networth);
+    var networth = new Element("div");
+    $("#account_pulldown").append(networth);
     networth.innerText = "[Inventory: 0.00]";
     networth.id = "inventory_networth";
-    setInterval(checkInventory, 1000);
+    setTimeout(processAsyncAssets, 1000);
+    setInterval(processAsyncAssets, 60 * 1000);
 })();
