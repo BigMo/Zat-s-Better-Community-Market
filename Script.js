@@ -10,6 +10,8 @@
 // ==/UserScript==
 var $ = window.jQuery;
 
+//TODO: Cache by classid or instanceid but NOT via instanceid!
+
 var origFn = CInventory.prototype.BuildItemElement;
 var asyncAssets = Array();
 
@@ -52,7 +54,6 @@ function processAsyncAssets() {
     var element = entry.element;
     var parent = entry.parent;
     var asset = entry.asset;
-    console.log(asset.description.name);
     getMarketValueForElement(element, parent, asset,
         function(scope) {
             asyncAssets.splice(0, 1);
@@ -103,20 +104,6 @@ function httpRequest(method, address, success, error, scope, post) {
     } else {
         xmlhttp.send();
     }
-}
-
-//Extracts marketable items from the given inventory
-function getMarketableItems(inventory) {
-    var assets = Array();
-    if (Object.keys(inventory.m_rgAssets).length > 0) {
-        for (var key in inventory.m_rgAssets) {
-            if (inventory.m_rgAssets.hasOwnProperty(key)) {
-                if (inventory.m_rgAssets[key].description.marketable == 1)
-                    assets.push(inventory.m_rgAssets[key]);
-            }
-        }
-    }
-    return assets;
 }
 
 function createPriceElement(parent, asset) {
