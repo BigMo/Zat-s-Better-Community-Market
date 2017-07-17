@@ -119,7 +119,7 @@ function createPriceElement(parent, asset) {
 function getMarketValueForElement(element, parent, asset, onSuccess, onSuccessScope) {
     element.innerText = "[pending]";
     element.style.background = "rgb(41,41,41)";
-    httpRequest("GET", "//steamcommunity.com/market/priceoverview/?country=" + g_rgWalletInfo.wallet_country + "&currency=" + g_rgWalletInfo.wallet_currency + "&appid=753&market_hash_name=" + asset.description.market_hash_name,
+    httpRequest("GET", "//steamcommunity.com/market/priceoverview/?country=" + g_rgWalletInfo.wallet_country + "&currency=" + g_rgWalletInfo.wallet_currency + "&appid=" + g_ActiveInventory.appid + "&market_hash_name=" + encodeURIComponent(GetMarketHashName(asset.description)),
         function(data, scope) {
             var obj = JSON.parse(data);
             scope.element.innerText = obj.lowest_price;
@@ -186,7 +186,7 @@ function installQuickSell(parent, asset) {
                     var parent = scope.button.parentNode;
                     parent.style.opacity = 0.1;
                     parent.removeChild(scope.button);
-                    MessageDialog.Show("Successfully sold \"" + scope.asset.description.name + "\" for " + v_currencyformat(scope.sellPrice, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + " (" + v_currencyformat(scope.price, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + ")!", "Zat's Better Community Market");
+                    //MessageDialog.Show("Successfully sold \"" + scope.asset.description.name + "\" for " + v_currencyformat( scope.sellPrice, GetCurrencyCode( g_rgWalletInfo['wallet_currency'] ) ) + " (" +  v_currencyformat( scope.price, GetCurrencyCode( g_rgWalletInfo['wallet_currency'] ) )+ ")!", "Zat's Better Community Market");
                 }, function(status, scope) {
                     MessageDialog.Show("Failed to sell \"" + scope.asset.description.name + "\": " + status, "Zat's Better Community Market");
                 }, {
@@ -212,12 +212,12 @@ function updateNetworth(price) {
     console.log("Zat's Better Community Market initiated!");
     console.log("Your SteamID: " + UserYou.strSteamId);
     document.getElementById("account_pulldown").innerText += " (" + v_currencyformat(g_rgWalletInfo.wallet_balance, GetCurrencyCode(g_rgWalletInfo['wallet_currency'])) + ")";
-    if (UserYou.nActiveAppId != 753) {
+    /*if (UserYou.nActiveAppId != 753) {
         console.log("You're not browsing Steam-inventory, terminating.");
         return;
     } else {
         console.log("You're browsing Steam-inventory!");
-    }
+    }*/
     var networth = new Element("div");
     $("#account_pulldown").append(networth);
     networth.innerText = "[Inventory: 0.00]";
